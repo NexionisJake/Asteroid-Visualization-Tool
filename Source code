@@ -1,0 +1,492 @@
+import logging
+import requests
+import tkinter as tk
+from tkinter import simpledialog, ttk, messagebox
+from tkcalendar import DateEntry
+from datetime import datetime
+from vpython import *
+import math
+import threading
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# NASA API details
+API_KEY = os.getenv("API_KEY")
+NEO_URL = "https://api.nasa.gov/neo/rest/v1/feed"
+
+# Global variables
+paused = False
+time_speed = 1
+asteroid_objects = []
+tracked_asteroid = None
+
+# Fetch asteroid data from NASA API
+def fetch_asteroid_data(start_date, end_date):
+    """
+    Fetches asteroid data from NASA's NEO API for the given date range.
+    
+    Args:
+        start_date (str): The start date in YYYY-MM-DD format.
+        end_date (str): The end date in YYYY-MM-DD format.
+    
+    Returns:
+        dict: A dictionary containing near-Earth objects data.
+    """
+    try:
+        url = f"{NEO_URL}?start_date={start_date}&end_date={end_date}&api_key={API_KEY}"
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+        return data.get('near_earth_objects', {})
+    except requests.exceptions.HTTPError as http_err:
+        logging.error(f"HTTP error occurred: {http_err}")
+    except Exception as err:
+        logging.error(f"Other error occurred: {err}")
+    return None
+
+# GUI for date input with date pickers and progress bar
+def get_date_range():
+    """
+    Opens a Tkinter GUI to get the start and end dates from the user.
+    
+    Returns:
+        tuple: A tuple containing the start date and end date as strings.
+    """
+    def on_submit():
+        start_date.set(start_date_entry.get_date().strftime("%Y-%m-%d"))
+        end_date.set(end_date_entry.get_date().strftime("%Y-%m-%d"))
+        root.destroy()
+
+    root = tk.Tk()
+    root.title("Select Date Range")
+    root.geometry("300x200")
+
+    start_date = tk.StringVar()
+    end_date = tk.StringVar()
+
+    tk.Label(root, text="Start Date:").pack(pady=5)
+    start_date_entry = DateEntry(root, width=12, background='darkblue', foreground='white', borderwidth=2)
+    start_date_entry.pack(pady=5)
+
+    tk.Label(root, text="End Date:").pack(pady=5)
+    end_date_entry = DateEntry(root, width=12, background='darkblue', foreground='white', borderwidth=2)
+    end_date_entry.pack(pady=5)
+
+    submit_button = tk.Button(root, text="Submit", command=on_submit)
+    submit_button.pack(pady=20)
+
+    root.mainloop()
+
+    return start_date.get(), end_date.get()
+
+# Filtering options
+def filter_asteroids(asteroids):
+    """
+    Prompts the user if they want to filter asteroids by size and filters accordingly.
+    
+    Args:
+        asteroids (list): A list of asteroid data dictionaries.
+    
+    Returns:
+        list: A filtered list of asteroid data dictionaries.
+    """
+    root = tk.Tk()
+    root.withdraw()  # Hide the root window
+
+    filter_choice = simpledialog.askstring("Input", "Do you want to filter by size? (yes/no):").lower()
+    if filter_choice == 'yes':
+        min_size = simpledialog.askfloat("Input", "Enter minimum size (in meters):")
+        max_size = simpledialog.askfloat("Input", "Enter maximum size (in meters):")
+        
+        # Filter the asteroids by size range
+        filtered_asteroids = [
+            asteroid for asteroid in asteroids
+            if min_size <= asteroid['estimated_diameter']['meters']['estimated_diameter_max'] <= max_size
+        ]
+        root.destroy()
+        return filtered_asteroids
+    else:
+        root.destroy()
+        return asteroids
+
+# VPython Visualization
+
+def create_earth():
+    """
+    Creates a 3D model of the Earth in the visualization.
+    
+    Returns:
+        sphere: A VPython sphere object representing the Earth.
+    """
+    earth_radius = 6371  # Earth's radius in km
+    earth = sphere(pos=vector(0, 0, 0), radius=earth_radius, texture=textures.earth)
+    return earth
+
+def create_asteroid(size, distance, orbital_period, name, data):
+    """
+    Creates a 3D model of an asteroid with its properties and orbital period.
+    
+    Args:
+        size (float): The size of the asteroid in kilometers.
+        distance (float): The distance of the asteroid from Earth in kilometers.
+        orbital_period (float): The orbital period of the asteroid in days.
+        name (str): The name of the asteroid.
+        data (dict): The data dictionary of the asteroid.
+    
+    Returns:
+        sphere: A VPython sphere object representing the asteroid.
+    """
+    if size < 100:
+        color_asteroid = vector(0, 1, 0)  # Green for small asteroids
+    elif size < 500:
+        color_asteroid = vector(0, 0, 1)  # Blue for medium asteroids
+    else:
+        color_asteroid = vector(1, 0, 0)  # Red for large asteroids
+
+    asteroid_radius = size * 0.1  # Adjust scaling factor if needed
+    asteroid_sphere = sphere(pos=vector(distance, 0, 0), radius=asteroid_radius, color=color_asteroid, make_trail=True)
+    asteroid_sphere.orbital_period = orbital_period
+    asteroid_sphere.name = name
+    asteroid_sphere.data = data
+    return asteroid_sphere
+
+def create_orbit(distance):
+    """
+    Creates a visible circular orbit for the asteroid.
+    
+    Args:
+        distance (float): The distance of the asteroid from Earth in kilometers.
+    
+    Returns:
+        curve: A VPython curve object representing the orbit.
+    """
+    orbit = curve(color=color.white)
+    num_points = 100
+    for i in range(num_points):
+        angle = 2 * math.pi * i / num_points
+        orbit.append(vector(distance * math.cos(angle), distance * math.sin(angle), 0))
+    return orbit
+
+class AsteroidSearch(tk.Toplevel):
+    """
+    A Tkinter Toplevel window for searching and displaying asteroid information.
+    """
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Asteroid Search")
+        self.geometry("800x600")
+        self.create_widgets()
+        self.initial_camera_pos = vector(0, 0, 50000)
+        self.initial_camera_axis = vector(0, 0, -1)
+        self.setup_mouse_controls()
+
+    def create_widgets(self):
+        """
+        Creates the widgets for the search window.
+        """
+        # Search bar
+        search_frame = ttk.Frame(self)
+        search_frame.pack(pady=10, padx=10, fill=tk.X)
+
+        self.search_var = tk.StringVar()
+        self.search_var.trace("w", self.update_list)
+        self.entry = ttk.Entry(search_frame, textvariable=self.search_var, width=30)
+        self.entry.pack(side=tk.LEFT, expand=True, fill=tk.X)
+
+        # Asteroid list
+        list_frame = ttk.Frame(self)
+        list_frame.pack(pady=10, padx=10, fill=tk.BOTH, expand=True)
+
+        self.listbox = tk.Listbox(list_frame, width=50, height=10)
+        self.listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.listbox.bind('<<ListboxSelect>>', self.on_select)
+
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.listbox.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.listbox.configure(yscrollcommand=scrollbar.set)
+
+        for asteroid in asteroid_objects:
+            self.listbox.insert(tk.END, asteroid.name)
+
+        # Info display
+        info_frame = ttk.Frame(self)
+        info_frame.pack(pady=10, padx=10, fill=tk.X)
+
+        self.info_text = tk.Text(info_frame, wrap=tk.WORD, width=50, height=5)
+        self.info_text.pack(fill=tk.X)
+
+        # Control buttons
+        control_frame = ttk.Frame(self)
+        control_frame.pack(pady=10, padx=10, fill=tk.X)
+
+        ttk.Button(control_frame, text="Reset View", command=self.reset_camera).pack(side=tk.LEFT, padx=5)
+        ttk.Button(control_frame, text="Zoom In to Asteroid", command=self.zoom_to_asteroid).pack(side=tk.LEFT, padx=5)
+        ttk.Button(control_frame, text="Zoom Out", command=self.zoom_out).pack(side=tk.LEFT, padx=5)
+
+        # Time control buttons
+        time_frame = ttk.Frame(self)
+        time_frame.pack(pady=10, padx=10, fill=tk.X)
+
+        ttk.Button(time_frame, text="Pause/Resume", command=self.toggle_pause).pack(side=tk.LEFT, padx=5)
+        ttk.Button(time_frame, text="Speed Up", command=self.speed_up).pack(side=tk.LEFT, padx=5)
+        ttk.Button(time_frame, text="Slow Down", command=self.slow_down).pack(side=tk.LEFT, padx=5)
+
+    def update_list(self, *args):
+        """
+        Updates the list of asteroids based on the search term.
+        """
+        search_term = self.search_var.get().lower()
+        self.listbox.delete(0, tk.END)
+        for asteroid in asteroid_objects:
+            if search_term in asteroid.name.lower():
+                self.listbox.insert(tk.END, asteroid.name)
+
+    def on_select(self, event):
+        """
+        Handles the selection of an asteroid from the list.
+        """
+        global paused, tracked_asteroid
+        selection = event.widget.curselection()
+        if selection:
+            index = selection[0]
+            asteroid_name = event.widget.get(index)
+            for asteroid in asteroid_objects:
+                if asteroid.name == asteroid_name:
+                    paused = True  # Pause the animation
+                    tracked_asteroid = asteroid
+                    self.focus_on_asteroid(asteroid)
+                    self.display_asteroid_info(asteroid)
+                    break
+
+    def focus_on_asteroid(self, asteroid):
+        """
+        Focuses the camera on the selected asteroid.
+        """
+        self.update_camera(zoom_in=True)
+
+    def update_camera(self, zoom_in=False):
+        """
+        Updates the camera position to focus on the tracked asteroid.
+        """
+        global tracked_asteroid
+        if tracked_asteroid:
+            distance_factor = 10 if zoom_in else 20
+            base_distance = mag(tracked_asteroid.pos)
+            zoom_distance = max(tracked_asteroid.radius * distance_factor, base_distance * 0.1)
+            camera_pos = tracked_asteroid.pos + norm(tracked_asteroid.pos) * zoom_distance
+            smooth_move_camera(camera_pos, tracked_asteroid.pos)
+
+    def reset_camera(self):
+        """
+        Resets the camera to the initial position.
+        """
+        global tracked_asteroid, paused
+        tracked_asteroid = None
+        paused = False
+        smooth_move_camera(self.initial_camera_pos, vector(0, 0, 0))
+
+    def setup_mouse_controls(self):
+        """
+        Enables mouse controls for the VPython scene.
+        """
+        scene.userzoom = True
+        scene.userspin = True
+        scene.userpan = True
+
+    def zoom_to_asteroid(self):
+        """
+        Zooms the camera in to the selected asteroid.
+        """
+        selection = self.listbox.curselection()
+        if selection:
+            asteroid_name = self.listbox.get(selection[0])
+            for asteroid in asteroid_objects:
+                if asteroid.name == asteroid_name:
+                    self.focus_on_asteroid(asteroid)
+                    break
+
+    def zoom_out(self):
+        """
+        Zooms the camera out from the tracked asteroid.
+        """
+        if tracked_asteroid:
+            current_distance = mag(scene.camera.pos - tracked_asteroid.pos)
+            new_distance = current_distance * 1.5
+            scene.camera.pos = tracked_asteroid.pos + norm(scene.camera.pos - tracked_asteroid.pos) * new_distance
+        else:
+            scene.camera.pos = scene.camera.pos * 1.5
+
+    def toggle_pause(self):
+        """
+        Toggles the pause state of the animation.
+        """
+        global paused
+        paused = not paused
+
+    def speed_up(self):
+        """
+        Increases the speed of the animation.
+        """
+        global time_speed
+        time_speed *= 1.5
+
+    def slow_down(self):
+        """
+        Decreases the speed of the animation.
+        """
+        global time_speed
+        time_speed /= 1.5
+
+    def display_asteroid_info(self, asteroid):
+        """
+        Displays detailed information about the selected asteroid.
+        """
+        info = f"Name: {asteroid.name}\n"
+        info += f"Size: {asteroid.radius * 10:.2f} km\n"
+        info += f"Distance from Earth: {asteroid.pos.mag:.2f} km\n"
+        info += f"Orbital Period: {asteroid.orbital_period:.2f} days\n"
+        
+        try:
+            velocity = float(asteroid.data['close_approach_data'][0]['relative_velocity']['kilometers_per_second'])
+            info += f"Velocity: {velocity:.2f} km/s\n"
+        except (KeyError, ValueError, IndexError):
+            info += "Velocity: Data not available\n"
+        
+        self.info_text.delete(1.0, tk.END)
+        self.info_text.insert(tk.END, info)
+
+def smooth_move_camera(target_pos, target_focus, steps=30):
+    """
+    Smoothly moves the camera to the target position and focus.
+    
+    Args:
+        target_pos (vector): The target position for the camera.
+        target_focus (vector): The target focus point for the camera.
+        steps (int): The number of steps for the smooth transition.
+    """
+    start_pos = scene.camera.pos
+    start_focus = scene.center
+    for i in range(steps):
+        rate(30)
+        t = (i + 1) / steps
+        scene.camera.pos = start_pos + (target_pos - start_pos) * t
+        scene.center = start_focus + (target_focus - start_focus) * t
+    scene.camera.axis = target_focus - target_pos
+
+def animate_asteroids():
+    """
+    Animates the asteroids' orbits around the Earth.
+    """
+    global paused, time_speed, tracked_asteroid
+    time_increment = 0.01
+    while True:
+        rate(30)
+        if not paused:
+            for asteroid in asteroid_objects:
+                angular_velocity = 2 * math.pi / asteroid.orbital_period
+                new_x = asteroid.pos.x * math.cos(angular_velocity * time_increment * time_speed) - asteroid.pos.y * math.sin(angular_velocity * time_increment * time_speed)
+                new_y = asteroid.pos.x * math.sin(angular_velocity * time_increment * time_speed) + asteroid.pos.y * math.cos(angular_velocity * time_increment * time_speed)
+                asteroid.pos = vector(new_x, new_y, asteroid.pos.z)
+        
+        if tracked_asteroid:
+            scene.center = tracked_asteroid.pos
+
+def update_camera():
+    """
+    Updates the camera position to focus on the tracked asteroid.
+    """
+    if tracked_asteroid:
+        distance_factor = 20
+        zoom_distance = max(tracked_asteroid.radius * distance_factor, mag(tracked_asteroid.pos) * 0.1)
+        camera_pos = tracked_asteroid.pos + norm(tracked_asteroid.pos) * zoom_distance
+        scene.camera.pos = camera_pos
+        scene.camera.axis = tracked_asteroid.pos - camera_pos
+
+def visualize_asteroids(asteroid_data):
+    """
+    Main visualization function to create and animate asteroids based on input data.
+    
+    Args:
+        asteroid_data (list): A list of asteroid data dictionaries.
+    """
+    global asteroid_objects
+    scene.title = "Asteroid Visualizer"
+    scene.width = 800
+    scene.height = 600
+    scene.background = vector(0.1, 0.1, 0.1)
+    scene.range = 50000
+
+    # Enable mouse interaction
+    scene.userzoom = True
+    scene.userspin = True
+    scene.userpan = True
+
+    earth = create_earth()
+
+    for data in asteroid_data:
+        size = float(data['estimated_diameter']['kilometers']['estimated_diameter_max'])
+        distance = float(data['close_approach_data'][0]['miss_distance']['kilometers'])
+        orbital_period = 365  # Simplified for visualization
+        name = data['name']
+
+        asteroid = create_asteroid(size, distance, orbital_period, name, data)
+        create_orbit(distance)
+
+        asteroid_objects.append(asteroid)
+
+    # Set initial camera position
+    scene.camera.pos = vector(0, 0, 50000)
+    scene.camera.axis = vector(0, 0, -1)
+
+    # Start the animation in a separate thread
+    animation_thread = threading.Thread(target=animate_asteroids)
+    animation_thread.daemon = True
+    animation_thread.start()
+
+    # Create and run the Tkinter GUI
+    root = tk.Tk()
+    root.withdraw()
+    search_window = AsteroidSearch(root)
+    root.mainloop()
+
+# Main function with thread management and API key handling
+def main():
+    """
+    Main function to start the program. Manages thread and API key handling.
+    """
+    # Check if API key is provided
+    if not API_KEY:
+        logging.error("NASA API Key is missing! Please set your API Key in the .env file.")
+        return
+
+    # Fetch the date range from the user
+    start_date, end_date = get_date_range()
+
+    logging.info(f"Fetching data from {start_date} to {end_date}...")
+
+    # Fetch asteroid data from NASA's API
+    asteroids_data = fetch_asteroid_data(start_date, end_date)
+
+    if asteroids_data:
+        all_asteroids = []
+        for date in asteroids_data:
+            all_asteroids.extend(asteroids_data[date])
+
+        logging.info(f"Asteroids fetched: {len(all_asteroids)}")
+
+        # Filter the asteroids by size (if needed)
+        filtered_asteroids = filter_asteroids(all_asteroids)
+
+        # Run visualization in the main thread
+        visualize_asteroids(filtered_asteroids)
+    else:
+        logging.warning("No asteroid data found for the given date range.")
+
+if __name__ == "__main__":
+    main()  # Start the program
