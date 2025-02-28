@@ -56,7 +56,7 @@ The **Asteroid Visualization Tool** aims to educate users about the risks and ch
 ### **Step-by-Step Setup**
 1. **Clone the Repository**:
     ```bash
-    git clone https://github.com/yourusername/asteroid-visualization-tool.git
+    git clone https://github.com/NexionisJake/asteroid-visualization-tool.git
     cd asteroid-visualization-tool
     ```
 
@@ -82,27 +82,8 @@ The **Asteroid Visualization Tool** aims to educate users about the risks and ch
 
 ---
 
-## **Future Enhancements**
-- **Real-Time Tracking**: Implement real-time asteroid tracking for continuous updates.
-- **Additional Filters**: Introduce more filtering criteria such as asteroid velocity or orbital period.
-- **User Profiles**: Allow users to save favorite asteroids or date ranges for future reference.
-- **Mobile Interface**: Build a mobile-friendly version of the tool.
 
----
 
-## **Contributors**
-- **Abhijeet Kumar** – Project Lead & API Integration
-- **Swastik R Phadke** – Lead Developer & 3D Visualization
-- **Kumari Pranjal** – GUI Developer
-- **Pulkit Tiwari** – Data Processing & Filtering
-- **Nagarjunacharya S** – Educational Content & Documentation
-- **Akshay Kumar** – Testing & Presentation
 
----
 
-## **License**
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
----
-
-Feel free to adjust any sections as needed based on your project specifics!
