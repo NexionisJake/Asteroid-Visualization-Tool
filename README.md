@@ -56,8 +56,8 @@ The **Asteroid Visualization Tool** aims to educate users about the risks and ch
 ### **Step-by-Step Setup**
 1. **Clone the Repository**:
     ```bash
-    git clone https://github.com/NexionisJake/asteroid-visualization-tool.git
-    cd asteroid-visualization-tool
+    git clone https://github.com/NexionisJake/Asteroid-Visualization-Tool.git
+    cd Asteroid-Visualization-Tool
     ```
 
 2. **Install Required Libraries**:
