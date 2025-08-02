@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Asteroid Visualization Tool</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Control Panel -->
+    <div class="control-panel">
+        <h2>Asteroid Visualizer</h2>
+        <div class="date-controls">
+            <label for="start-date">Start Date:</label>
+            <input type="date" id="start-date" value="2024-01-01">
+            
+            <label for="end-date">End Date:</label>
+            <input type="date" id="end-date" value="2024-01-07">
+        </div>
+        
+        <div class="filter-controls">
+            <label>
+                <input type="checkbox" id="enable-filter"> Filter by Size
+            </label>
+            <div class="size-filter" id="size-filter" style="display: none;">
+                <label for="min-size">Min Size (m):</label>
+                <input type="number" id="min-size" value="0" min="0">
+                
+                <label for="max-size">Max Size (m):</label>
+                <input type="number" id="max-size" value="1000" min="0">
+            </div>
+        </div>
+        
+        <button id="fetch-asteroids">Fetch Asteroids</button>
+        <div class="status" id="status">Ready</div>
+        
+        <div class="animation-controls">
+            <button id="pause-resume">Pause</button>
+            <button id="speed-up">Speed Up</button>
+            <button id="slow-down">Slow Down</button>
+            <button id="reset-view">Reset View</button>
+        </div>
+    </div>
+
+    <!-- Information Panel -->
+    <div class="info-panel" id="info-panel" style="display: none;">
+        <h3>Asteroid Information</h3>
+        <div id="asteroid-info">
+            <p><strong>Name:</strong> <span id="asteroid-name">-</span></p>
+            <p><strong>Size:</strong> <span id="asteroid-size">-</span></p>
+            <p><strong>Distance:</strong> <span id="asteroid-distance">-</span></p>
+            <p><strong>Velocity:</strong> <span id="asteroid-velocity">-</span></p>
+            <p><strong>Close Approach:</strong> <span id="asteroid-approach">-</span></p>
+        </div>
+        <button id="close-info">Close</button>
+    </div>
+
+    <!-- Search Panel -->
+    <div class="search-panel">
+        <input type="text" id="search-input" placeholder="Search asteroids...">
+        <div class="search-results" id="search-results"></div>
+    </div>
+
+    <!-- 3D Visualization Canvas -->
+    <canvas id="visualizer-canvas"></canvas>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loading-overlay" style="display: none;">
+        <div class="loading-content">
+            <div class="spinner"></div>
+            <p>Fetching asteroid data...</p>
+        </div>
+    </div>
+
+    <!-- External Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
